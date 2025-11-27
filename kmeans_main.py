@@ -97,3 +97,204 @@ plt.legend(
 plt.tight_layout(rect=[0, 0, 0.85, 1])
 plt.savefig('data/post_clustering/kmeans_hotspots_descending_full.png', dpi=150, bbox_inches='tight')
 plt.close()
+
+
+# ============================================================
+# CLUSTER INTERPRETATION
+# ============================================================
+
+print("\n" + "="*70)
+print("CLUSTER INTERPRETATION")
+print("="*70)
+
+# Borough estimation from Council District
+# Manhattan: 1-10, Bronx: 11-18, Brooklyn: 33-48, Queens: 19-32, Staten Island: 49-51
+def estimate_borough(council_district):
+    try:
+        cd = int(council_district)
+        if 1 <= cd <= 10:
+            return 'Manhattan'
+        elif 11 <= cd <= 18 or cd == 8:
+            return 'Bronx'
+        elif 19 <= cd <= 32:
+            return 'Queens'
+        elif 33 <= cd <= 48:
+            return 'Brooklyn'
+        elif 49 <= cd <= 51:
+            return 'Staten Island'
+        else:
+            return 'Unknown'
+    except:
+        return 'Unknown'
+
+# One-hot column definitions
+permit_type_cols = [c for c in df_all.columns if c.startswith('Permit Type_')]
+job_type_cols = [c for c in df_all.columns if c.startswith('Job Type_')]
+permit_status_cols = [c for c in df_all.columns if c.startswith('Permit Status_')]
+
+# Permit Type full names
+permit_type_names = {
+    'DM': 'Demolition',
+    'EQ': 'Equipment',
+    'EW': 'Equipment Work',
+    'FO': 'Foundation',
+    'NB': 'New Building',
+    'PL': 'Plumbing',
+    'SG': 'Sign'
+}
+
+# Job Type full names
+job_type_names = {
+    'A1': 'Alteration Type 1',
+    'A2': 'Alteration Type 2',
+    'A3': 'Alteration Type 3',
+    'DM': 'Demolition',
+    'NB': 'New Building',
+    'SG': 'Sign'
+}
+
+# Store results for table
+interpretation_results = []
+
+for cluster_id in sorted(df_all['kmeans_cluster'].unique()):
+    cluster_data = df_all[df_all['kmeans_cluster'] == cluster_id]
+    n_samples = len(cluster_data)
+    pct = n_samples / len(df_all) * 100
+    
+    print(f"\n{'='*50}")
+    print(f"CLUSTER {cluster_id}: {n_samples:,} samples ({pct:.1f}%)")
+    print(f"{'='*50}")
+    
+    # ----- 1. Top Permit Type -----
+    if permit_type_cols:
+        permit_sums = cluster_data[permit_type_cols].sum()
+        top_permit_col = permit_sums.idxmax()
+        top_permit_code = top_permit_col.replace('Permit Type_', '')
+        top_permit_name = permit_type_names.get(top_permit_code, top_permit_code)
+        top_permit_pct = permit_sums[top_permit_col] / n_samples * 100
+        print(f"  Top Permit Type: {top_permit_name} ({top_permit_code}) - {top_permit_pct:.1f}%")
+    else:
+        top_permit_name = 'N/A'
+    
+    # ----- 2. Top Job Type -----
+    if job_type_cols:
+        job_sums = cluster_data[job_type_cols].sum()
+        top_job_col = job_sums.idxmax()
+        top_job_code = top_job_col.replace('Job Type_', '')
+        top_job_name = job_type_names.get(top_job_code, top_job_code)
+        top_job_pct = job_sums[top_job_col] / n_samples * 100
+        print(f"  Top Job Type: {top_job_name} ({top_job_code}) - {top_job_pct:.1f}%")
+    else:
+        top_job_name = 'N/A'
+    
+    # ----- 3. Residential Ratio -----
+    if 'Residential_YES' in cluster_data.columns:
+        residential_pct = cluster_data['Residential_YES'].mean() * 100
+        residential_label = 'Residential' if residential_pct > 50 else 'Commercial/Mixed'
+        print(f"  Residential: {residential_pct:.1f}% → {residential_label}")
+    else:
+        residential_pct = 0
+        residential_label = 'Unknown'
+    
+    # ----- 4. Permit Status -----
+    if permit_status_cols:
+        status_sums = cluster_data[permit_status_cols].sum()
+        top_status_col = status_sums.idxmax()
+        top_status = top_status_col.replace('Permit Status_', '')
+        top_status_pct = status_sums[top_status_col] / n_samples * 100
+        print(f"  Top Permit Status: {top_status} - {top_status_pct:.1f}%")
+    else:
+        top_status = 'N/A'
+    
+    # ----- 5. Temporal Features -----
+    if 'Filing_Year' in cluster_data.columns:
+        avg_year = cluster_data['Filing_Year'].mean()
+        print(f"  Avg Filing Year: {avg_year:.1f}")
+    else:
+        avg_year = 0
+    
+    if 'Permit_Age_Days' in cluster_data.columns:
+        avg_age = cluster_data['Permit_Age_Days'].mean()
+        print(f"  Avg Permit Processing Time: {avg_age:.1f} days")
+    else:
+        avg_age = 0
+    
+    # ----- 6. Geographic Center -----
+    if 'LATITUDE_ORIG' in cluster_data.columns and 'LONGITUDE_ORIG' in cluster_data.columns:
+        lat_center = cluster_data['LATITUDE_ORIG'].mean()
+        long_center = cluster_data['LONGITUDE_ORIG'].mean()
+        print(f"  Geographic Center: ({lat_center:.4f}, {long_center:.4f})")
+    else:
+        lat_center, long_center = 0, 0
+    
+    # ----- 7. Estimate Borough from Council District -----
+    if 'COUNCIL_DISTRICT' in cluster_data.columns:
+        # Unscale if needed (assuming it was standardized)
+        # For now, use mode of rounded values
+        try:
+            borough_counts = cluster_data['COUNCIL_DISTRICT'].apply(
+                lambda x: estimate_borough(round(x * 10 + 25))  # rough unscaling
+            ).value_counts()
+            top_borough = borough_counts.index[0] if len(borough_counts) > 0 else 'Unknown'
+        except:
+            top_borough = 'Unknown'
+        print(f"  Estimated Borough: {top_borough}")
+    else:
+        top_borough = 'Unknown'
+    
+    # ----- 8. Generate Cluster Label -----
+    # Create a human-readable cluster description
+    if n_samples < 1000:
+        size_label = "Specialized/Rare"
+    elif pct < 5:
+        size_label = "Small"
+    elif pct < 20:
+        size_label = "Medium"
+    else:
+        size_label = "Large"
+    
+    cluster_label = f"{size_label} {residential_label} - {top_permit_name}"
+    print(f"\n  → CLUSTER LABEL: {cluster_label}")
+    
+    # Store for summary table
+    interpretation_results.append({
+        'Cluster': cluster_id,
+        'Size': n_samples,
+        'Pct': f"{pct:.1f}%",
+        'Top_Permit': top_permit_name,
+        'Top_Job': top_job_name,
+        'Residential%': f"{residential_pct:.1f}%",
+        'Avg_Year': f"{avg_year:.0f}" if avg_year > 0 else 'N/A',
+        'Processing_Days': f"{avg_age:.0f}" if avg_age > 0 else 'N/A',
+        'Label': cluster_label
+    })
+
+# ============================================================
+# SUMMARY TABLE
+# ============================================================
+print("\n" + "="*70)
+print("CLUSTER INTERPRETATION SUMMARY TABLE")
+print("="*70)
+
+summary_df = pd.DataFrame(interpretation_results)
+print(summary_df.to_string(index=False))
+
+# Save to CSV
+summary_df.to_csv('data/cluster_interpretation.csv', index=False)
+print("\n✓ Saved: data/cluster_interpretation.csv")
+
+# ============================================================
+# MARKDOWN TABLE FOR PRESENTATION
+# ============================================================
+print("\n" + "="*70)
+print("MARKDOWN TABLE (Copy for Presentation)")
+print("="*70)
+
+print("\n| Cluster | Size | % | Top Permit | Top Job | Residential | Label |")
+print("|---------|------|---|------------|---------|-------------|-------|")
+for r in interpretation_results:
+    print(f"| {r['Cluster']} | {r['Size']:,} | {r['Pct']} | {r['Top_Permit']} | {r['Top_Job']} | {r['Residential%']} | {r['Label']} |")
+
+print("\n" + "="*70)
+print("CLUSTER INTERPRETATION COMPLETE")
+print("="*70)
